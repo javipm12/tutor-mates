@@ -1232,12 +1232,22 @@ if not os.path.exists(DOCS_FOLDER):
     DOCS_FOLDER = "documentos_centro"
     os.makedirs(DOCS_FOLDER, exist_ok=True)
 
+def _get_docs_signature(folder_path: str) -> tuple:
+    """Genera una firma con los nombres y fechas de modificación de los PDF para auto-invalidar la caché."""
+    if not os.path.exists(folder_path):
+        return ()
+    try:
+        files = sorted(f for f in os.listdir(folder_path) if f.lower().endswith(".pdf"))
+        return tuple((f, os.path.getmtime(os.path.join(folder_path, f))) for f in files)
+    except Exception:
+        return ()
+
 @st.cache_data
-def load_preloaded_documents(folder_path: str):
+def load_preloaded_documents(folder_path: str, files_signature: tuple = ()):
     """
     Lee automáticamente todos los archivos .pdf dentro de folder_path usando pypdf.
     Guarda el número de página de cada texto extraído y un resumen de páginas leídas.
-    Usa @st.cache_data para una carga instantánea en reinicios y consultas.
+    Usa @st.cache_data para una carga instantánea, auto-invalidándose si se añaden o modifican PDFs.
     """
     docs_summary = []
     pages_data = []
@@ -1323,8 +1333,9 @@ with tab5:
         st.error("⚠️ La librería `pypdf` no está instalada en el entorno. Por favor, ejecuta `pip install pypdf` para habilitar la lectura de documentos PDF.")
         st.stop()
 
-    # Carga automática con @st.cache_data
-    docs_summary, preloaded_pages = load_preloaded_documents(DOCS_FOLDER)
+    # Carga automática con @st.cache_data y auto-invalidación de caché por firma de archivos
+    docs_sig = _get_docs_signature(DOCS_FOLDER)
+    docs_summary, preloaded_pages = load_preloaded_documents(DOCS_FOLDER, files_signature=docs_sig)
 
     # 1. Resumen limpio en verde arriba indicando los documentos precargados
     if docs_summary:
@@ -1341,14 +1352,20 @@ with tab5:
             for d in valid_docs
         ])
 
-        st.markdown(f"""
-        <div style="background-color: #f0fdf4; border: 1px solid #86efac; border-left: 6px solid #22c55e; border-radius: 8px; padding: 14px 18px; margin-bottom: 16px;">
-            <div style="color: #166534; font-weight: 700; font-size: 1.05rem; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-                <span>✅</span> <span>Documentos de Normativa Precargados ({total_docs} archivo{'s' if total_docs != 1 else ''} • {total_paginas} páginas)</span>
+        col_badge, col_btn_reload = st.columns([5, 1])
+        with col_badge:
+            st.markdown(f"""
+            <div style="background-color: #f0fdf4; border: 1px solid #86efac; border-left: 6px solid #22c55e; border-radius: 8px; padding: 14px 18px; margin-bottom: 16px;">
+                <div style="color: #166534; font-weight: 700; font-size: 1.05rem; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                    <span>✅</span> <span>Documentos de Normativa Precargados ({total_docs} archivo{'s' if total_docs != 1 else ''} • {total_paginas} páginas)</span>
+                </div>
+                {doc_badges}
             </div>
-            {doc_badges}
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
+        with col_btn_reload:
+            if st.button("🔄 Recargar", key="btn_reload_docs", help="Fuerza la relectura de los PDFs de la carpeta documentos_centro"):
+                load_preloaded_documents.clear()
+                st.rerun()
 
         if error_docs:
             for err in error_docs:
@@ -1376,17 +1393,20 @@ with tab5:
     st.caption("Formula cualquier pregunta sobre convivencia, sanciones, guardia de aula o uso de dispositivos. La IA responderá exclusivamente con los documentos indicando página exacta.")
 
     # Botones rápidos de consulta
-    col_nq1, col_nq2, col_nq3 = st.columns(3)
+    col_nq1, col_nq2, col_nq3, col_nq4 = st.columns(4)
     pregunta_rapida_norm = None
     with col_nq1:
-        if st.button("📱 Uso de teléfonos móviles", use_container_width=True, key="btn_norm_movil"):
+        if st.button("📱 Móviles", use_container_width=True, key="btn_norm_movil"):
             pregunta_rapida_norm = "¿Cuál es la normativa sobre el uso de teléfonos móviles y dispositivos electrónicos en el centro y las aulas?"
     with col_nq2:
-        if st.button("🚨 Faltas graves y sanciones", use_container_width=True, key="btn_norm_graves"):
+        if st.button("🚨 Faltas y sanciones", use_container_width=True, key="btn_norm_graves"):
             pregunta_rapida_norm = "¿Qué conductas se tipifican como faltas graves o muy graves y qué sanciones y medidas correctoras contempla el centro?"
     with col_nq3:
-        if st.button("🚪 Protocolo de retrasos y guardias", use_container_width=True, key="btn_norm_guardias"):
+        if st.button("🚪 Retrasos y guardias", use_container_width=True, key="btn_norm_guardias"):
             pregunta_rapida_norm = "¿Cuál es el protocolo de actuación ante el retraso de un alumno y qué obligaciones tiene el profesorado de guardia?"
+    with col_nq4:
+        if st.button("🤝 Plan de Convivencia", use_container_width=True, key="btn_norm_convivencia"):
+            pregunta_rapida_norm = "¿Cuáles son las medidas preventivas, protocolos de mediación escolar y normas que establece el Plan de Convivencia?"
 
     # Inicializar historial de chat de normativa
     if "normativa_chat_messages" not in st.session_state:
